@@ -1,29 +1,20 @@
 #[macro_use]
 extern crate lazy_static;
 
-use std::{any::Any, collections::HashMap, error::Error, future, time::Duration};
+use std::{collections::HashMap, error::Error, time::Duration};
 
-use futures::future::join_all;
-use regex::Regex;
-use thirtyfour::{
-    actions::{ActionSequence, KeyActions},
-    By, DesiredCapabilities, Key, WebDriver,
-};
-use tokio::{
-    io::{self, AsyncReadExt},
-    process::Command,
-    time::{sleep, Instant},
-};
+use thirtyfour::{By, DesiredCapabilities, Key, WebDriver};
+use tokio::time::{sleep, Instant};
 
 lazy_static! {
-    static ref wordlist: Vec<String> = include_str!("wordle_words.txt")
+    static ref WORDLIST: Vec<String> = include_str!("wordle_words.txt")
         .split("\n")
         .map(|x| x.to_owned())
         .collect();
 }
 
 async fn write_word(driver: &WebDriver, text: &str) -> Result<(), Box<dyn Error>> {
-    let is_valid = wordlist.contains(&text.to_owned()); // <-- what?
+    let is_valid = WORDLIST.contains(&text.to_owned()); // <-- what?
 
     if !is_valid {
         return Err("Input is not in wordle word list".into());
@@ -174,7 +165,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .click()
         .await?;
 
-    let mut filtered_words = wordlist.clone();
+    let mut filtered_words = WORDLIST.clone();
 
     loop {
         sleep(Duration::from_millis(1500)).await;
