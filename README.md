@@ -4,9 +4,9 @@ Solves wordles in a browser window.
 
 ## Dependencies
 
-- Rust & Cargo
-- Firefox
-- Geckodriver
+- [Rust & Cargo](https://rustup.rs/)
+- [Firefox](https://firefox.com)
+- [Geckodriver](https://github.com/mozilla/geckodriver/releases)
 
 ## How to run
 
