@@ -83,7 +83,7 @@ async fn get_letters_state(
     Ok(map)
 }
 
-fn apply_filter(target_array: &mut Vec<String>, rules: HashMap<char, LetterState>) {
+fn apply_filter(target_array: &mut Vec<String>, rules: &HashMap<char, LetterState>) {
     for rule in rules.iter() {
         match rule.1 {
             LetterState::Absent => target_array.retain(|x| !x.contains(&rule.0.to_string())),
@@ -111,27 +111,86 @@ fn calculate_letter_occurances(array_ref: &Vec<String>) -> HashMap<char, u32> {
     map
 }
 
-fn calculate_best_word(array_ref: &Vec<String>) -> String {
-    let mut copy = array_ref.clone();
-    let letter_occurances = calculate_letter_occurances(array_ref);
+fn calculate_best_word(
+    filtered_words: &Vec<String>,
+    letters_state: &HashMap<char, LetterState>,
+    guesses_made: &u8,
+) -> String {
+    let mut copy = WORDLIST.clone();
+    let mut letter_occurances = calculate_letter_occurances(&copy);
+
+    let closeness_score: i32 = letters_state.values().fold(0i32, |acc, state| match state {
+        LetterState::Absent => 0,
+        LetterState::Present(_) => 20,
+        LetterState::Correct(_) => 40
+    } + acc) - filtered_words.len() as i32;
+
+    // if true, try best guess. if false, try to gather info
+    let try_to_win = *guesses_made == 5
+        || (6 - guesses_made) as usize >= filtered_words.len()
+        || closeness_score > 0;
+
+    println!(
+        "closeness score: {}, possible words left are {}, will {}try to win",
+        closeness_score,
+        filtered_words.len(),
+        if !try_to_win { "not " } else { "" }
+    );
+
+    // only valid guesses are good guesses if were trying to win
+    if try_to_win {
+        copy = filtered_words.clone();
+        letter_occurances = calculate_letter_occurances(filtered_words);
+    }
+
     copy.sort_by_cached_key(|x| {
         let score = x
             .chars()
             .fold(0, |acc, e| acc + letter_occurances.get(&e).unwrap()) as i32;
         score * -1
     });
-    copy.sort_by(|a, b| {
-        fn count_duplicates(s: &str) -> usize {
-            let mut char_count = HashMap::new();
-            for c in s.chars() {
-                *char_count.entry(c).or_insert(0) += 1;
-            }
-            char_count.values().filter(|&count| *count > 1).count()
+
+    // if were not trying to win, sort the words by the chance that they reveal some useful info
+    if !try_to_win {
+        let mut letter_occurance_values = letter_occurances.values().collect::<Vec<&u32>>();
+        letter_occurance_values.sort();
+        let highest_letter_occurance = **letter_occurance_values.last().unwrap();
+
+        copy.sort_by_cached_key(|x| {
+            let mut i = 0;
+            let score = x.chars().fold(0, |acc, e| {
+                let letter_score = match letters_state.get(&e) {
+                    Some(LetterState::Absent) => 0,
+                    Some(LetterState::Correct(_)) => 1,
+                    Some(LetterState::Present(pos)) => {
+                        if *pos == i {
+                            1
+                        } else {
+                            10
+                        }
+                    }
+                    None => 100,
+                };
+                i += 1;
+                letter_score
+                    + (*letter_occurances.get(&e).unwrap() as f32 / highest_letter_occurance as f32
+                        * 50f32)
+                        .round() as i32
+                    + acc
+            });
+            -score
+        })
+    }
+
+    // sort words with duplicates further down
+    copy.sort_by_cached_key(|x| {
+        let mut char_count = HashMap::new();
+        for c in x.chars() {
+            *char_count.entry(c).or_insert(0) += 1;
         }
-        count_duplicates(a)
-            .partial_cmp(&count_duplicates(b))
-            .unwrap()
+        char_count.values().filter(|&count| *count > 1).count()
     });
+
     copy[0].clone()
 }
 
@@ -167,20 +226,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut filtered_words = WORDLIST.clone();
 
+    let mut i = 0u8;
     loop {
         sleep(Duration::from_millis(1500)).await;
+
         let start_time = Instant::now();
-        apply_filter(&mut filtered_words, get_letters_state(&driver).await?);
-        let best_word = &calculate_best_word(&filtered_words);
+
+        let letters_state = get_letters_state(&driver).await?;
+        apply_filter(&mut filtered_words, &letters_state);
+
+        let best_word = &calculate_best_word(&filtered_words, &letters_state, &i);
+
         let calc_time = start_time.elapsed();
-        write_word(&driver, best_word).await?;
+
         println!("it took {:?} to calculate word {}", calc_time, best_word);
+
+        write_word(&driver, best_word).await?;
+
         if filtered_words.len() == 1 {
             break;
         }
+        i += 1;
     }
 
-    println!("Correct word was: {}", filtered_words[0]);
+    println!(
+        "Found correct solution in {} guesses. Correct word was: {}",
+        i, filtered_words[0]
+    );
 
     Ok(())
 }
